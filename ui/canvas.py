@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import math
 
-from PySide6.QtCore import QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QPoint, QRect, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QFont, QImage, QMouseEvent, QPainter, QPixmap
-from PySide6.QtWidgets import (QGraphicsPixmapItem, QGraphicsScene, QGraphicsView)
+from PySide6.QtWidgets import (QGraphicsPixmapItem, QGraphicsScene, QGraphicsView, QRubberBand)
 
 from .widgets import checker_pixmap
 
@@ -15,6 +15,7 @@ class Canvas(QGraphicsView):
     pixel_moved = Signal(int, int)             # (-1, -1) when the cursor is off the image
     zoom_changed = Signal(float)
     file_dropped = Signal(str)
+    rect_selected = Signal(int, int, int, int, object)  # x0,y0,x1,y1, Qt.KeyboardModifiers
 
     MIN_ZOOM, MAX_ZOOM = 0.02, 64.0
 
@@ -37,6 +38,12 @@ class Canvas(QGraphicsView):
         self._panning = False
         self._show_checker = True
         self._checker = QBrush(checker_pixmap())
+
+        # Rubber-band drag-select state
+        self._drag_selecting = False
+        self._drag_start_vp: QPoint | None = None   # viewport-space press position
+        self._drag_start_px: tuple[int, int] | None = None  # image-pixel press position
+        self._rubber_band = QRubberBand(QRubberBand.Rectangle, self.viewport())
 
         self.setRenderHint(QPainter.Antialiasing, True)
         self.setRenderHint(QPainter.SmoothPixmapTransform, True)
@@ -171,6 +178,8 @@ class Canvas(QGraphicsView):
             self.viewport().setCursor(Qt.CrossCursor)
         super().keyReleaseEvent(e)
 
+    _DRAG_THRESHOLD = 4  # pixels in viewport space before a drag is recognized
+
     def mousePressEvent(self, e: QMouseEvent):
         self.setFocus()
         if e.button() == Qt.MiddleButton or (e.button() == Qt.LeftButton and self._space):
@@ -181,22 +190,63 @@ class Canvas(QGraphicsView):
             super().mousePressEvent(fake)
             return
         if e.button() == Qt.LeftButton and self.has_image():
+            vp = e.position().toPoint()
             pt = self._to_pixel(e.position())
-            if pt:
-                self.pixel_clicked.emit(pt[0], pt[1], e.modifiers())
+            self._drag_start_vp = vp
+            self._drag_start_px = pt
+            self._drag_selecting = False
         super().mousePressEvent(e)
 
     def mouseMoveEvent(self, e):
         pt = self._to_pixel(e.position()) if self.has_image() else None
         self.pixel_moved.emit(*(pt if pt else (-1, -1)))
+
+        # Rubber-band drag detection (only when left button is held)
+        if self._drag_start_vp is not None and (e.buttons() & Qt.LeftButton) and self.has_image():
+            vp = e.position().toPoint()
+            delta = vp - self._drag_start_vp
+            if not self._drag_selecting and (
+                abs(delta.x()) > self._DRAG_THRESHOLD or abs(delta.y()) > self._DRAG_THRESHOLD
+            ):
+                self._drag_selecting = True
+            if self._drag_selecting:
+                self._rubber_band.setGeometry(QRect(self._drag_start_vp, vp).normalized())
+                self._rubber_band.show()
+
         super().mouseMoveEvent(e)
 
     def mouseReleaseEvent(self, e):
-        super().mouseReleaseEvent(e)
         if self._panning:
             self._panning = False
             self.setDragMode(QGraphicsView.NoDrag)
             self.viewport().setCursor(Qt.OpenHandCursor if self._space else Qt.CrossCursor)
+            super().mouseReleaseEvent(e)
+            return
+
+        if e.button() == Qt.LeftButton and self.has_image():
+            if self._drag_selecting:
+                # Finish rubber-band — emit rect in image-pixel coordinates
+                self._rubber_band.hide()
+                self._drag_selecting = False
+                vp = e.position().toPoint()
+                rect = QRect(self._drag_start_vp, vp).normalized()
+                tl = self._to_pixel(rect.topLeft())
+                br = self._to_pixel(rect.bottomRight())
+                if tl and br:
+                    x0, y0 = tl
+                    x1, y1 = br
+                    if x0 != x1 or y0 != y1:
+                        self.rect_selected.emit(x0, y0, x1, y1, e.modifiers())
+            else:
+                # Plain click (drag never exceeded threshold)
+                if self._drag_start_px:
+                    px = self._drag_start_px
+                    self.pixel_clicked.emit(px[0], px[1], e.modifiers())
+
+            self._drag_start_vp = None
+            self._drag_start_px = None
+
+        super().mouseReleaseEvent(e)
 
     def leaveEvent(self, e):
         self.pixel_moved.emit(-1, -1)
