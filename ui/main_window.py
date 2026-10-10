@@ -18,7 +18,7 @@ class MainWindow(QMainWindow):
     def __init__(self, controller):
         super().__init__()
         self.ctrl = controller
-        self.setWindowTitle("Region Editor")
+        self.setWindowTitle("Decalify")
         self.resize(1360, 820)
         self.setMinimumSize(980, 600)
 
@@ -109,9 +109,9 @@ class MainWindow(QMainWindow):
             self, "Preferences", "Placeholder: add your app preferences here."))
 
         m = mb.addMenu("&About")
-        self._act(m, "About Region Editor", lambda: QMessageBox.about(
-            self, "About Region Editor",
-            "Region Editor\nSelect the parts of a PNG and restyle them: fill, border, image fill."))
+        self._act(m, "About Decalify", lambda: QMessageBox.about(
+            self, "About Decalify",
+            "Decalify\nSelect the parts of a PNG and restyle them: fill, border, image fill."))
         self._act(m, "About Qt", lambda: QMessageBox.aboutQt(self))
 
     def _build_statusbar(self):
@@ -140,6 +140,7 @@ class MainWindow(QMainWindow):
         t.tool_changed.connect(c.set_tool)
         t.options_changed.connect(c.set_options)
         cv.pixel_clicked.connect(c.on_click)
+        cv.rect_selected.connect(c.on_rect_select)
         cv.file_dropped.connect(c.open_image)
         r.import_clicked.connect(self._import)
         r.retrace_clicked.connect(self._open_retrace)
@@ -162,7 +163,7 @@ class MainWindow(QMainWindow):
         self.right.set_has_image(True)
         self.lbl_size.setText(f"{img.width()} × {img.height()} px   ")
         name = (self.ctrl.path or "").replace("\\", "/").split("/")[-1]
-        self.setWindowTitle(f"{name} — Region Editor" if name else "Region Editor")
+        self.setWindowTitle(f"{name} — Decalify" if name else "Decalify")
 
     # ---------------------------------------------------------------- actions
     def _import(self):
