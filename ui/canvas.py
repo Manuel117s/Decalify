@@ -128,7 +128,8 @@ class Canvas(QGraphicsView):
         self.zoom_changed.emit(self._zoom)
 
     def _to_pixel(self, pos) -> tuple[int, int] | None:
-        s = self.mapToScene(pos.toPoint())
+        pt = pos.toPoint() if hasattr(pos, "toPoint") else pos
+        s = self.mapToScene(pt)
         x, y = int(math.floor(s.x())), int(math.floor(s.y()))
         if 0 <= x < self._img_size.width() and 0 <= y < self._img_size.height():
             return x, y
@@ -230,13 +231,19 @@ class Canvas(QGraphicsView):
                 self._drag_selecting = False
                 vp = e.position().toPoint()
                 rect = QRect(self._drag_start_vp, vp).normalized()
-                tl = self._to_pixel(rect.topLeft())
-                br = self._to_pixel(rect.bottomRight())
-                if tl and br:
-                    x0, y0 = tl
-                    x1, y1 = br
-                    if x0 != x1 or y0 != y1:
-                        self.rect_selected.emit(x0, y0, x1, y1, e.modifiers())
+                s_tl = self.mapToScene(rect.topLeft())
+                s_br = self.mapToScene(rect.bottomRight())
+                x0 = int(math.floor(min(s_tl.x(), s_br.x())))
+                y0 = int(math.floor(min(s_tl.y(), s_br.y())))
+                x1 = int(math.floor(max(s_tl.x(), s_br.x())))
+                y1 = int(math.floor(max(s_tl.y(), s_br.y())))
+                w, h = self._img_size.width(), self._img_size.height()
+                cx0 = max(0, min(w - 1, x0))
+                cy0 = max(0, min(h - 1, y0))
+                cx1 = max(0, min(w - 1, x1))
+                cy1 = max(0, min(h - 1, y1))
+                if cx0 <= cx1 and cy0 <= cy1 and (cx0 != cx1 or cy0 != cy1):
+                    self.rect_selected.emit(cx0, cy0, cx1, cy1, e.modifiers())
             else:
                 # Plain click (drag never exceeded threshold)
                 if self._drag_start_px:
