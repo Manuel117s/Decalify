@@ -40,10 +40,10 @@ The application strictly isolates UI and image processing logic:
 - **Image Import & Conversion**: Completed — fast `QImage` ↔ NumPy RGBA conversion (`qimage_to_numpy`, `numpy_to_qimage`).
 - **Tracing / Segmentation**: Completed — OpenCV connected components, all 4 detection modes, filtering, morphology, gap and hole processing (`run_segmentation`).
 - **Selection System**: Completed — label map lookup `labels[y, x]`, multi-selection, visual outline overlays, and cropped preview extraction.
-- **Styling Engine**: In Progress / Next — Fill, Border, Image, Gradient, Glow rendering pipeline.
-- **Advanced Tools**: Unimplemented — Eyedropper integration, Merge, Split, Reset.
+- **Styling Engine**: Completed — non-destructive multi-pass rendering pipeline (Fill with blend modes, Outside/Inside/Center Solid & Dashed/Dotted borders, Texture Image Fill, Linear & Radial Gradients, Drop Shadow / Glow, Reset, Eyedropper).
+- **Advanced Tools**: In Progress / Next — Merge, Split.
 - **Undo / Redo**: Stubbed.
-- **Export**: Basic PNG save only — needs Selection PNG and SVG contour vectorizer.
+- **Export**: PNG and Selection PNG completed — SVG contour vectorizer next.
 
 ---
 
@@ -73,11 +73,11 @@ The application strictly isolates UI and image processing logic:
   - Display informative caption (dimensions, pixel area, region ID count).
 
 ### Phase 3: Per-Region Styling & Rendering Engine
-- [ ] **3.1 Non-Destructive Style Model**:
+- [x] **3.1 Non-Destructive Style Model**:
   - Maintain a data structure storing per-region styles (Fill, Border, Image Fill, Gradient, Glow).
   - Create a composite renderer that paints original base image + region styling into `self.result`.
   - Live preview update when options change in `set_options()`.
-- [ ] **3.2 Tool Implementations**:
+- [x] **3.2 Tool Implementations**:
   - **Fill Tool**: Solid color with opacity, blend modes (Normal, Multiply, Screen, Overlay), and antialiased edge smoothing.
   - **Border Tool**: Morphological ring generation (`dilate - mask` for Outside, `mask - erode` for Inside, centered) with custom width, opacity, color, and dash styles.
   - **Image Fill Tool**: Scale, rotate, and map an external image into region bounding boxes (`Cover`, `Stretch`, `Contain`, `Tile`), clipped to the region mask.
@@ -107,3 +107,4 @@ The application strictly isolates UI and image processing logic:
 |---|---|---|
 | 2026-10-09 | **Codebase Review & Project Documentation** | Completed full audit of existing PySide6 UI and controller stubs. Initialized `PROJECT_PROGRESS.md` with system architecture, component breakdown, and step-by-step implementation roadmap. |
 | 2026-10-09 | **Phase 1 & Phase 2: Segmentation Engine & Selection System** | Implemented NumPy ↔ QImage bridge (`qimage_to_numpy`, `numpy_to_qimage`), OpenCV connected components segmentation (`auto`, `alpha`, `threshold`, `color` modes, blur, morphology closing, holes, gaps, and area filtering), live re-trace preview and cancellation, vectorized outline generation, multi-region selection (Replace, Add, Subtract), and right panel cropped preview with metadata. Verified with automated controller & GUI integration tests. |
+| 2026-10-10 | **Phase 3: Per-Region Styling & Rendering Engine** | Implemented non-destructive styling pipeline: Solid Fill with blend modes (Normal, Multiply, Screen, Overlay), Outside/Center/Inside Solid and Dashed/Dotted borders, Texture Image Fill (Cover, Stretch, Contain, Tile with rotation/scale), Linear & Radial Gradients, Drop Shadow / Outer Glow, live styling updates on option change, Reset tool, Eyedropper integration, and Selection PNG export. Verified with automated unit and GUI integration tests. |
