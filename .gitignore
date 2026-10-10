@@ -3,3 +3,6 @@ __pycache__/
 *$py.class
 .venv/
 .pytest_cache/
+build/
+dist/
+*.spec
