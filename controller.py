@@ -6,6 +6,7 @@ and responds to Qt signals.
 """
 from __future__ import annotations
 
+import copy
 import cv2
 import numpy as np
 
@@ -554,6 +555,11 @@ class EditorController(QObject):
         # Split tool state
         self._split_start: tuple[int, int] | None = None
 
+        # Undo / redo history
+        self._history: list[dict] = []   # list of state snapshots
+        self._history_index: int = -1    # current position in history
+        self._MAX_HISTORY = 50           # limit memory usage
+
     # ---- file ---------------------------------------------------------------------
     def open_image(self, path: str):
         img = QImage(path)
@@ -568,6 +574,8 @@ class EditorController(QObject):
         self.selected_regions.clear()
         self.region_styles.clear()
         self._split_start = None
+        self._history.clear()
+        self._history_index = -1
 
         self.image_loaded.emit(self.result)
         self.preview_changed.emit(None, "")
@@ -656,6 +664,7 @@ class EditorController(QObject):
             self.result_changed.emit(self.result)
             ov = self.build_overlay(self.labels, self.selected_regions, self.show_outlines)
             self.overlay_changed.emit(ov)
+            self._push_history("Re-trace" if self._history else "Initial trace")
             self.status.emit(f"Re-traced: {count} regions found")
 
     def retrace_cancel(self):
@@ -967,6 +976,7 @@ class EditorController(QObject):
         self.render_composite()
         self.result_changed.emit(self.result)
         self._update_preview()
+        self._push_history(f"Apply {tool}")
         self.status.emit(f"Applied {tool} to {len(self.selected_regions)} region(s)")
 
     def on_click(self, x: int, y: int, modifiers):
@@ -1078,6 +1088,51 @@ class EditorController(QObject):
             p.end()
             self.overlay_changed.emit(ov)
 
+    def on_rect_select(self, x0: int, y0: int, x1: int, y1: int, modifiers):
+        """Handle drag-selection rectangle on the canvas."""
+        if self.result is None or self.labels is None:
+            return
+        if self.tool != "select":
+            self.on_click(x0, y0, modifiers)
+            return
+
+        shift = False
+        alt = False
+        if modifiers:
+            if isinstance(modifiers, Qt.KeyboardModifiers):
+                shift = bool(modifiers & Qt.ShiftModifier)
+                alt = bool(modifiers & Qt.AltModifier)
+            else:
+                val = modifiers.value if hasattr(modifiers, "value") else int(modifiers)
+                shift = bool(val & Qt.ShiftModifier.value)
+                alt = bool(val & Qt.AltModifier.value)
+
+        h, w = self.labels.shape[:2]
+        min_x = max(0, min(x0, x1))
+        max_x = min(w, max(x0, x1) + 1)
+        min_y = max(0, min(y0, y1))
+        max_y = min(h, max(y0, y1) + 1)
+
+        if min_x >= max_x or min_y >= max_y:
+            return
+
+        sub = self.labels[min_y:max_y, min_x:max_x]
+        intersected = set(np.unique(sub)) - {0}
+        intersected = {int(r) for r in intersected if r in self.regions}
+
+        mode = self.options.get("select", {}).get("Mode", "Replace")
+        if alt or mode == "Subtract":
+            self.selected_regions.difference_update(intersected)
+        elif shift or mode == "Add":
+            self.selected_regions.update(intersected)
+        else:  # Replace
+            self.selected_regions = set(intersected)
+
+        ov = self.build_overlay(self.labels, self.selected_regions, self.show_outlines)
+        self.overlay_changed.emit(ov)
+        self._update_preview()
+        self.status.emit(f"Drag selected {len(self.selected_regions)} region(s)")
+
     # ---- geometry operations (merge & split) --------------------------------------
     def merge_selected_regions(self, fill_gaps: bool = False):
         """Combine multiple selected regions into a single unified region."""
@@ -1117,6 +1172,7 @@ class EditorController(QObject):
         ov = self.build_overlay(self.labels, self.selected_regions, self.show_outlines)
         self.overlay_changed.emit(ov)
         self._update_preview()
+        self._push_history(f"Merge {len(valid_sel)} regions")
         self.status.emit(f"Merged {len(valid_sel)} regions into Region #{target_rid}")
 
     def split_region_at_line(self, p1: tuple[int, int], p2: tuple[int, int], cut_width: int = 2):
@@ -1177,6 +1233,7 @@ class EditorController(QObject):
         ov = self.build_overlay(self.labels, self.selected_regions, self.show_outlines)
         self.overlay_changed.emit(ov)
         self._update_preview()
+        self._push_history(f"Split Region #{target_rid}")
 
     def _recompute_region_geom(self, rid: int):
         """Recompute bounding box, area, centroid, and contours for a modified region."""
@@ -1250,12 +1307,57 @@ class EditorController(QObject):
 
         self.preview_changed.emit(crop_qimg, caption)
 
-    # ---- edit menu ----------------------------------------------------------------
+    # ---- history (undo / redo) ---------------------------------------------------
+    def _push_history(self, description: str = ""):
+        if self.labels is None:
+            return
+        if self._history_index < len(self._history) - 1:
+            self._history = self._history[: self._history_index + 1]
+
+        snapshot = {
+            "labels": self.labels.copy(),
+            "regions": copy.deepcopy(self.regions),
+            "region_styles": copy.deepcopy(self.region_styles),
+            "selected_regions": set(self.selected_regions),
+            "retrace_params": dict(self.retrace_params),
+            "description": description,
+        }
+        self._history.append(snapshot)
+        if len(self._history) > self._MAX_HISTORY:
+            self._history.pop(0)
+        self._history_index = len(self._history) - 1
+
+    def _restore_snapshot(self, snapshot: dict):
+        self.labels = snapshot["labels"].copy()
+        self.regions = copy.deepcopy(snapshot["regions"])
+        self.region_styles = copy.deepcopy(snapshot["region_styles"])
+        self.selected_regions = set(snapshot["selected_regions"])
+        if "retrace_params" in snapshot:
+            self.retrace_params = dict(snapshot["retrace_params"])
+        self._split_start = None
+        self.render_composite()
+        self.result_changed.emit(self.result)
+        ov = self.build_overlay(self.labels, self.selected_regions, self.show_outlines)
+        self.overlay_changed.emit(ov)
+        self._update_preview()
+
     def undo(self):
-        self.status.emit("Undo (not implemented)")
+        if self._history_index > 0:
+            cur_desc = self._history[self._history_index].get("description", "")
+            self._history_index -= 1
+            self._restore_snapshot(self._history[self._history_index])
+            self.status.emit(f"Undo: {cur_desc}" if cur_desc else "Undo")
+        else:
+            self.status.emit("Nothing to undo")
 
     def redo(self):
-        self.status.emit("Redo (not implemented)")
+        if self._history_index < len(self._history) - 1:
+            self._history_index += 1
+            desc = self._history[self._history_index].get("description", "")
+            self._restore_snapshot(self._history[self._history_index])
+            self.status.emit(f"Redo: {desc}" if desc else "Redo")
+        else:
+            self.status.emit("Nothing to redo")
 
     def select_all(self):
         if not self.regions or self.labels is None:
