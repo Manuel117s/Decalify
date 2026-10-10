@@ -9,7 +9,7 @@ from ui.theme import stylesheet
 
 def main():
     app = QApplication(sys.argv)
-    app.setApplicationName("Region Editor")
+    app.setApplicationName("Decalify")
     app.setStyle("Fusion")          # consistent look on every OS; the stylesheet does the rest
     app.setStyleSheet(stylesheet())
 
