@@ -41,9 +41,9 @@ The application strictly isolates UI and image processing logic:
 - **Tracing / Segmentation**: Completed — OpenCV connected components, all 4 detection modes, filtering, morphology, gap and hole processing (`run_segmentation`).
 - **Selection System**: Completed — label map lookup `labels[y, x]`, multi-selection, visual outline overlays, and cropped preview extraction.
 - **Styling Engine**: Completed — non-destructive multi-pass rendering pipeline (Fill with blend modes, Outside/Inside/Center Solid & Dashed/Dotted borders, Texture Image Fill, Linear & Radial Gradients, Drop Shadow / Glow, Reset, Eyedropper).
-- **Advanced Tools**: In Progress / Next — Merge, Split.
-- **Undo / Redo**: Stubbed.
-- **Export**: PNG and Selection PNG completed — SVG contour vectorizer next.
+- **Advanced Tools**: Completed — Merge (with gap filling) and Split (two-point interactive cutting line with visual crosshair marker).
+- **Undo / Redo**: Stubbed / Next.
+- **Export**: Completed — PNG composite export, Selection PNG transparent crop export, and vector SVG XML export with evenodd paths, gradients, filters, and strokes.
 
 ---
 
@@ -87,14 +87,14 @@ The application strictly isolates UI and image processing logic:
   - **Reset Tool**: Selectively clear fill, border, image, or effect styles for active regions.
 
 ### Phase 4: Advanced Tools & Geometry Operations
-- [ ] **4.1 Merge Tool**: Combine multiple selected region IDs into a unified region, with optional gap filling.
-- [ ] **4.2 Split Tool**: Partition a shape along a line or cut path into separate connected components.
+- [x] **4.1 Merge Tool**: Combine multiple selected region IDs into a unified region, with optional gap filling.
+- [x] **4.2 Split Tool**: Partition a shape along a line or cut path into separate connected components.
 
 ### Phase 5: Undo / Redo & Export Systems
 - [ ] **5.1 Undo / Redo History**:
   - Implement snapshot or delta history stack for region styling, merges, and splits.
   - Hook up keyboard shortcuts (`Ctrl+Z`, `Ctrl+Y`) and Edit menu actions.
-- [ ] **5.2 Export Handlers**:
+- [x] **5.2 Export Handlers**:
   - **PNG**: Export complete styled composite.
   - **Selection PNG**: Export selected region(s) on transparent background (cropped or canvas-sized).
   - **SVG Vector Export**: Convert region contours via `cv2.findContours` to SVG XML path elements with fills and strokes.
@@ -108,3 +108,4 @@ The application strictly isolates UI and image processing logic:
 | 2026-10-09 | **Codebase Review & Project Documentation** | Completed full audit of existing PySide6 UI and controller stubs. Initialized `PROJECT_PROGRESS.md` with system architecture, component breakdown, and step-by-step implementation roadmap. |
 | 2026-10-09 | **Phase 1 & Phase 2: Segmentation Engine & Selection System** | Implemented NumPy ↔ QImage bridge (`qimage_to_numpy`, `numpy_to_qimage`), OpenCV connected components segmentation (`auto`, `alpha`, `threshold`, `color` modes, blur, morphology closing, holes, gaps, and area filtering), live re-trace preview and cancellation, vectorized outline generation, multi-region selection (Replace, Add, Subtract), and right panel cropped preview with metadata. Verified with automated controller & GUI integration tests. |
 | 2026-10-10 | **Phase 3: Per-Region Styling & Rendering Engine** | Implemented non-destructive styling pipeline: Solid Fill with blend modes (Normal, Multiply, Screen, Overlay), Outside/Center/Inside Solid and Dashed/Dotted borders, Texture Image Fill (Cover, Stretch, Contain, Tile with rotation/scale), Linear & Radial Gradients, Drop Shadow / Outer Glow, live styling updates on option change, Reset tool, Eyedropper integration, and Selection PNG export. Verified with automated unit and GUI integration tests. |
+| 2026-10-10 | **Phase 4 & Export: Geometry Operations & SVG Export** | Implemented Merge tool (combining label IDs and recomputing geometries with optional gap filling), Split tool (two-point interactive cutting line with visual crosshair marker, line carving, and connected components partitioning), full vector SVG export (`generate_svg` with evenodd contour paths, linear/radial gradients, drop shadow filters, dashed/dotted strokes), and PNG composite & selection export. Verified with automated unit and XML validation tests. |

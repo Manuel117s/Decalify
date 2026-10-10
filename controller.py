@@ -75,6 +75,14 @@ def to_rgba(c) -> tuple[int, int, int, int]:
     return qc.red(), qc.green(), qc.blue(), qc.alpha()
 
 
+def to_hex(c) -> str:
+    """Convert a QColor or color string to a #RRGGBB hex string."""
+    if isinstance(c, QColor):
+        return c.name(QColor.HexRgb)
+    qc = QColor(c)
+    return qc.name(QColor.HexRgb)
+
+
 def blend_pixels(base_rgb: np.ndarray, fill_rgb: np.ndarray, mode: str) -> np.ndarray:
     """Apply standard blend modes between two float/uint8 RGB arrays."""
     b = base_rgb.astype(np.float32) / 255.0
@@ -222,6 +230,133 @@ def render_dashed_border(
     elif position == "Outside":
         arr[region_mask > 0] = [0, 0, 0, 0]
     return arr
+
+
+def contour_to_svg_path(contours: list) -> str:
+    """Convert a list of OpenCV contours to an SVG path d-string."""
+    subpaths = []
+    for c in contours:
+        pts = c.reshape(-1, 2)
+        if len(pts) < 3:
+            continue
+        d = f"M {pts[0][0]} {pts[0][1]} " + " ".join(f"L {p[0]} {p[1]}" for p in pts[1:]) + " Z"
+        subpaths.append(d)
+    return " ".join(subpaths)
+
+
+def generate_svg(w: int, h: int, regions: dict, region_styles: dict, original_np: np.ndarray) -> str:
+    """Generate high-quality vector SVG document representing all styled regions."""
+    defs = []
+    paths = []
+
+    for rid, rdata in sorted(regions.items()):
+        cnts = rdata.get("contours", [])
+        if not cnts:
+            continue
+        d_str = contour_to_svg_path(cnts)
+        if not d_str:
+            continue
+
+        styles = region_styles.get(rid, {})
+        bx, by, bw, bh = rdata["bbox"]
+
+        # Default fallback fill from original image
+        sub = (original_np[by:by + bh, bx:bx + bw, 3] > 10)
+        if np.any(sub):
+            mean_col = np.mean(original_np[by:by + bh, bx:bx + bw, :3][sub], axis=0)
+            fill_val = f"rgb({int(mean_col[0])},{int(mean_col[1])},{int(mean_col[2])})"
+            fill_op = 1.0
+        else:
+            fill_val = "none"
+            fill_op = 1.0
+
+        filter_attr = ""
+        stroke_attr = 'stroke="none"'
+
+        # Glow filter
+        if "glow" in styles:
+            g = styles["glow"]
+            g_col = to_hex(g.get("color", "#000000"))
+            blur = int(g.get("blur", 12))
+            dx = int(g.get("dx", 4))
+            dy = int(g.get("dy", 4))
+            g_op = float(g.get("opacity", 60)) / 100.0
+            defs.append(f"""
+    <filter id="glow_{rid}" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="{blur / 2.0}" result="blur" />
+      <feOffset in="blur" dx="{dx}" dy="{dy}" result="offset" />
+      <feFlood flood-color="{g_col}" flood-opacity="{g_op}" result="color" />
+      <feComposite in="color" in2="offset" operator="in" result="shadow" />
+      <feMerge>
+        <feMergeNode in="shadow" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>""")
+            filter_attr = f' filter="url(#glow_{rid})"'
+
+        # Gradient fill
+        if "gradient" in styles:
+            gr = styles["gradient"]
+            c1_hex = to_hex(gr.get("c1", "#ff7a18"))
+            c2_hex = to_hex(gr.get("c2", "#af002d"))
+            gtype = gr.get("type", "Linear")
+            angle = float(gr.get("angle", 90))
+            gr_op = float(gr.get("opacity", 100)) / 100.0
+            fill_op = gr_op
+
+            if gtype == "Radial":
+                defs.append(f"""
+    <radialGradient id="grad_{rid}" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="{c1_hex}" stop-opacity="{gr_op}" />
+      <stop offset="100%" stop-color="{c2_hex}" stop-opacity="{gr_op}" />
+    </radialGradient>""")
+            else:
+                rad = np.radians(angle)
+                x1 = int(50 - 50 * np.cos(rad))
+                y1 = int(50 - 50 * np.sin(rad))
+                x2 = int(50 + 50 * np.cos(rad))
+                y2 = int(50 + 50 * np.sin(rad))
+                defs.append(f"""
+    <linearGradient id="grad_{rid}" x1="{x1}%" y1="{y1}%" x2="{x2}%" y2="{y2}%">
+      <stop offset="0%" stop-color="{c1_hex}" stop-opacity="{gr_op}" />
+      <stop offset="100%" stop-color="{c2_hex}" stop-opacity="{gr_op}" />
+    </linearGradient>""")
+            fill_val = f"url(#grad_{rid})"
+
+        # Solid fill
+        elif "fill" in styles:
+            f = styles["fill"]
+            fill_val = to_hex(f.get("color", "#e63946"))
+            fill_op = float(f.get("opacity", 100)) / 100.0
+
+        # Border
+        if "border" in styles:
+            b = styles["border"]
+            b_col = to_hex(b.get("color", "#000000"))
+            b_w = int(b.get("width", 4))
+            b_op = float(b.get("opacity", 100)) / 100.0
+            b_style = b.get("style", "Solid")
+            b_corn = "round" if b.get("corners", "Round") == "Round" else "miter"
+
+            dash_attr = ""
+            if b_style == "Dashed":
+                dash_attr = f' stroke-dasharray="{b_w * 3} {b_w * 1.5}"'
+            elif b_style == "Dotted":
+                dash_attr = f' stroke-dasharray="{b_w} {b_w}"'
+
+            stroke_attr = f'stroke="{b_col}" stroke-width="{b_w}" stroke-opacity="{b_op}" stroke-linejoin="{b_corn}" stroke-linecap="{b_corn}"{dash_attr}'
+
+        path_tag = f'  <path id="region_{rid}" d="{d_str}" fill="{fill_val}" fill-opacity="{fill_op}" fill-rule="evenodd" {stroke_attr}{filter_attr} />'
+        paths.append(path_tag)
+
+    defs_str = f"  <defs>{''.join(defs)}\n  </defs>\n" if defs else ""
+    paths_str = "\n".join(paths)
+
+    return f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" width="{w}" height="{h}">
+{defs_str}  <g id="regions">
+{paths_str}
+  </g>
+</svg>"""
 
 
 # =============================================================================
@@ -416,6 +551,9 @@ class EditorController(QObject):
         # Per-region styling descriptors: {rid: {"fill": {...}, "border": {...}, ...}}
         self.region_styles: dict[int, dict] = {}
 
+        # Split tool state
+        self._split_start: tuple[int, int] | None = None
+
     # ---- file ---------------------------------------------------------------------
     def open_image(self, path: str):
         img = QImage(path)
@@ -429,6 +567,7 @@ class EditorController(QObject):
         self.result = self.original.copy()
         self.selected_regions.clear()
         self.region_styles.clear()
+        self._split_start = None
 
         self.image_loaded.emit(self.result)
         self.preview_changed.emit(None, "")
@@ -440,11 +579,13 @@ class EditorController(QObject):
 
     def export(self, kind: str, path: str):
         """kind: 'png' | 'svg' | 'selection_png'"""
-        if self.result is None:
+        if self.result is None or self.original_np is None:
+            self.status.emit("Nothing to export")
             return
+
         if kind == "png":
             ok = self.result.save(path)
-            self.status.emit(f"Exported {path}" if ok else f"Failed to save {path}")
+            self.status.emit(f"Exported PNG to {path}" if ok else f"Failed to save {path}")
         elif kind == "selection_png":
             if not self.selected_regions or self.labels is None:
                 self.status.emit("No region selected to export")
@@ -466,9 +607,20 @@ class EditorController(QObject):
             sel_qimg = numpy_to_qimage(crop)
             ok = sel_qimg.save(path)
             self.status.emit(f"Exported selection to {path}" if ok else f"Failed to save {path}")
+        elif kind == "svg":
+            if not self.regions:
+                self.status.emit("No regions to export as SVG")
+                return
+            w, h = self.original_np.shape[1], self.original_np.shape[0]
+            svg_text = generate_svg(w, h, self.regions, self.region_styles, self.original_np)
+            try:
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(svg_text)
+                self.status.emit(f"Exported vector SVG to {path}")
+            except Exception as e:
+                self.status.emit(f"Failed to export SVG: {e}")
         else:
-            # TODO(logic): SVG via contours
-            self.status.emit(f"'{kind}' export is not implemented yet")
+            self.status.emit(f"'{kind}' export is not supported")
 
     # ---- tracing ------------------------------------------------------------------
     def retrace(self, params: dict, preview: bool = False):
@@ -498,6 +650,7 @@ class EditorController(QObject):
             self.preview_labels = None
             self.preview_regions = None
             self.selected_regions.clear()
+            self._split_start = None
             self.preview_changed.emit(None, "")
             self.render_composite()
             self.result_changed.emit(self.result)
@@ -772,6 +925,7 @@ class EditorController(QObject):
     # ---- tools --------------------------------------------------------------------
     def set_tool(self, tool: str):
         self.tool = tool
+        self._split_start = None
         self.status.emit(f"Tool: {tool}")
 
     def set_options(self, tool: str, opts: dict):
@@ -844,6 +998,7 @@ class EditorController(QObject):
 
         rid = int(self.labels[y, x])
 
+        # Select Tool
         if self.tool == "select":
             mode = self.options.get("select", {}).get("Mode", "Replace")
             if rid == 0:
@@ -872,7 +1027,192 @@ class EditorController(QObject):
                 self.apply_tool_action(self.tool, self.options.get(self.tool, {}))
             return
 
-        # TODO(logic): merge and split tools
+        # Merge Tool
+        if self.tool == "merge":
+            if shift:
+                if rid > 0:
+                    self.selected_regions.add(rid)
+                    ov = self.build_overlay(self.labels, self.selected_regions, self.show_outlines)
+                    self.overlay_changed.emit(ov)
+                    self._update_preview()
+                    self.status.emit(f"Selected {len(self.selected_regions)} regions. Click again without Shift to merge.")
+            else:
+                if len(self.selected_regions) >= 2:
+                    fill_gaps = bool(self.options.get("merge", {}).get("fill_gaps", False))
+                    self.merge_selected_regions(fill_gaps=fill_gaps)
+                elif rid > 0:
+                    self.selected_regions.add(rid)
+                    ov = self.build_overlay(self.labels, self.selected_regions, self.show_outlines)
+                    self.overlay_changed.emit(ov)
+                    self._update_preview()
+                    self.status.emit(f"Region #{rid} selected. Shift-click more regions, then click to merge.")
+            return
+
+        # Split Tool
+        if self.tool == "split":
+            cut_w = int(self.options.get("split", {}).get("cut", 2))
+            if self._split_start is None:
+                self._split_start = (x, y)
+                self.status.emit(f"Cut line started at ({x}, {y}). Click the second point across the shape to cut.")
+                self._show_split_marker(x, y)
+            else:
+                p1 = self._split_start
+                p2 = (x, y)
+                self._split_start = None
+                self.split_region_at_line(p1, p2, cut_width=cut_w)
+            return
+
+    def _show_split_marker(self, x: int, y: int):
+        """Draw an interactive crosshair/point on the overlay at the first cut point."""
+        ov = self.build_overlay(self.labels, self.selected_regions, self.show_outlines)
+        if ov is None and self.labels is not None:
+            ov = numpy_to_qimage(np.zeros((self.labels.shape[0], self.labels.shape[1], 4), dtype=np.uint8))
+        if ov is not None:
+            p = QPainter(ov)
+            p.setRenderHint(QPainter.Antialiasing, True)
+            p.setPen(QPen(QColor(255, 60, 60, 240), 2))
+            p.drawLine(x - 8, y, x + 8, y)
+            p.drawLine(x, y - 8, x, y + 8)
+            p.setBrush(QColor(255, 60, 60, 80))
+            p.drawEllipse(QPoint(x, y), 6, 6)
+            p.end()
+            self.overlay_changed.emit(ov)
+
+    # ---- geometry operations (merge & split) --------------------------------------
+    def merge_selected_regions(self, fill_gaps: bool = False):
+        """Combine multiple selected regions into a single unified region."""
+        if len(self.selected_regions) < 2 or self.labels is None:
+            self.status.emit("Select at least 2 regions to merge")
+            return
+
+        valid_sel = sorted([r for r in self.selected_regions if r in self.regions])
+        if len(valid_sel) < 2:
+            return
+
+        target_rid = valid_sel[0]
+        absorbed_rids = valid_sel[1:]
+
+        union_mask = np.isin(self.labels, valid_sel)
+
+        if fill_gaps:
+            u8_mask = union_mask.astype(np.uint8) * 255
+            k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
+            closed = cv2.morphologyEx(u8_mask, cv2.MORPH_CLOSE, k)
+            other_regions = (self.labels > 0) & (~union_mask)
+            fill_mask = (closed > 0) & (~other_regions)
+            self.labels[fill_mask] = target_rid
+        else:
+            self.labels[union_mask] = target_rid
+
+        self._recompute_region_geom(target_rid)
+
+        # Remove absorbed regions
+        for r in absorbed_rids:
+            self.regions.pop(r, None)
+            self.region_styles.pop(r, None)
+
+        self.selected_regions = {target_rid}
+        self.render_composite()
+        self.result_changed.emit(self.result)
+        ov = self.build_overlay(self.labels, self.selected_regions, self.show_outlines)
+        self.overlay_changed.emit(ov)
+        self._update_preview()
+        self.status.emit(f"Merged {len(valid_sel)} regions into Region #{target_rid}")
+
+    def split_region_at_line(self, p1: tuple[int, int], p2: tuple[int, int], cut_width: int = 2):
+        """Carve a cut line between p1 and p2 across shapes, splitting into new components."""
+        if self.labels is None:
+            return
+
+        h, w = self.labels.shape[:2]
+        line_mask = np.zeros((h, w), dtype=np.uint8)
+        cv2.line(line_mask, p1, p2, 255, thickness=max(1, cut_width))
+
+        cut_pixels = (line_mask > 0) & (self.labels > 0)
+        intersected_rids = np.unique(self.labels[cut_pixels])
+
+        if len(intersected_rids) == 0:
+            self.status.emit(f"Cut from {p1} to {p2} did not cross any region")
+            ov = self.build_overlay(self.labels, self.selected_regions, self.show_outlines)
+            self.overlay_changed.emit(ov)
+            return
+
+        target_rid = int(intersected_rids[0])
+        t_mask = (self.labels == target_rid) & (line_mask == 0)
+        conn = 4 if self.retrace_params.get("connectivity", 8) == 4 else 8
+        n_comp, raw_comp, stats, centroids = cv2.connectedComponentsWithStats(
+            t_mask.astype(np.uint8) * 255,
+            connectivity=conn,
+        )
+
+        if n_comp - 1 <= 1:
+            self.labels[(self.labels == target_rid) & (line_mask > 0)] = 0
+            self._recompute_region_geom(target_rid)
+            self.status.emit(f"Carved line across Region #{target_rid}")
+        else:
+            self.labels[self.labels == target_rid] = 0
+            new_ids = []
+            next_avail_id = max(self.regions.keys()) + 1 if self.regions else 1
+
+            # Assign first component back to target_rid
+            self.labels[raw_comp == 1] = target_rid
+            self._recompute_region_geom(target_rid)
+            new_ids.append(target_rid)
+
+            # Assign new IDs to remaining components
+            for c in range(2, n_comp):
+                c_area = int(stats[c, cv2.CC_STAT_AREA])
+                if c_area >= self.retrace_params.get("min_area", 4):
+                    new_rid = next_avail_id
+                    next_avail_id += 1
+                    self.labels[raw_comp == c] = new_rid
+                    self._recompute_region_geom(new_rid)
+                    new_ids.append(new_rid)
+
+            self.selected_regions = set(new_ids)
+            self.status.emit(f"Split Region #{target_rid} into {len(new_ids)} separate regions!")
+
+        self.render_composite()
+        self.result_changed.emit(self.result)
+        ov = self.build_overlay(self.labels, self.selected_regions, self.show_outlines)
+        self.overlay_changed.emit(ov)
+        self._update_preview()
+
+    def _recompute_region_geom(self, rid: int):
+        """Recompute bounding box, area, centroid, and contours for a modified region."""
+        reg_mask = (self.labels == rid)
+        if not np.any(reg_mask):
+            self.regions.pop(rid, None)
+            self.region_styles.pop(rid, None)
+            return
+
+        coords = np.argwhere(reg_mask)
+        min_y, min_x = coords.min(axis=0)
+        max_y, max_x = coords.max(axis=0)
+        bw = int(max_x - min_x + 1)
+        bh = int(max_y - min_y + 1)
+        bx, by = int(min_x), int(min_y)
+        area = int(np.sum(reg_mask))
+        cy = float(np.mean(coords[:, 0]))
+        cx = float(np.mean(coords[:, 1]))
+
+        sub = (self.labels[by:by + bh, bx:bx + bw] == rid).astype(np.uint8) * 255
+        sub_pad = np.pad(sub, 1, mode="constant")
+        cnts, hier = cv2.findContours(sub_pad, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
+        adj = [c + np.array([[[bx - 1, by - 1]]], dtype=np.int32) for c in cnts]
+        simplify = float(self.retrace_params.get("simplify", 0.8))
+        if simplify > 0:
+            adj = [cv2.approxPolyDP(c, simplify, closed=True) for c in adj]
+
+        self.regions[rid] = {
+            "id": rid,
+            "bbox": (bx, by, bw, bh),
+            "area": area,
+            "centroid": (cx, cy),
+            "contours": adj,
+            "hierarchy": hier,
+            "is_gap": False,
+        }
 
     def _update_preview(self):
         """Extract cropped preview and caption for the right panel."""
@@ -928,6 +1268,7 @@ class EditorController(QObject):
 
     def deselect(self):
         self.selected_regions.clear()
+        self._split_start = None
         if self.labels is not None:
             ov = self.build_overlay(self.labels, self.selected_regions, self.show_outlines)
             self.overlay_changed.emit(ov)
