@@ -42,7 +42,8 @@ The application strictly isolates UI and image processing logic:
 - **Selection System**: Completed — label map lookup `labels[y, x]`, multi-selection, visual outline overlays, and cropped preview extraction.
 - **Styling Engine**: Completed — non-destructive multi-pass rendering pipeline (Fill with blend modes, Outside/Inside/Center Solid & Dashed/Dotted borders, Texture Image Fill, Linear & Radial Gradients, Drop Shadow / Glow, Reset, Eyedropper).
 - **Advanced Tools**: Completed — Merge (with gap filling) and Split (two-point interactive cutting line with visual crosshair marker).
-- **Undo / Redo**: Stubbed / Next.
+- **Undo / Redo**: Completed — snapshot history stack with memory bounding, restoring label matrices, geometries, styles, selection sets, and trace parameters.
+- **Drag-to-Select**: Completed — viewport rubber-band drag interaction converting to image-space bounding box with Replace, Add, and Subtract modifier modes.
 - **Export**: Completed — PNG composite export, Selection PNG transparent crop export, and vector SVG XML export with evenodd paths, gradients, filters, and strokes.
 
 ---
@@ -65,6 +66,7 @@ The application strictly isolates UI and image processing logic:
   - Map click coordinates `(x, y)` to region ID via `labels[y, x]`.
   - Support selection modes: Replace, Add (or Shift+Click), Subtract (or Alt+Click).
   - Background click handling (`rid == 0`) and `select_all()` / `deselect()`.
+  - **Drag-to-Select**: Interactive rubber-band marquee on canvas to batch-select multiple regions intersecting the bounding box.
 - [x] **2.2 Visual Overlays & Outlines**:
   - Generate selection highlight mask (tinted semi-transparent fill + boundary contour) for active regions.
   - Support global region outline display toggle (`set_show_outlines`).
@@ -90,14 +92,17 @@ The application strictly isolates UI and image processing logic:
 - [x] **4.1 Merge Tool**: Combine multiple selected region IDs into a unified region, with optional gap filling.
 - [x] **4.2 Split Tool**: Partition a shape along a line or cut path into separate connected components.
 
-### Phase 5: Undo / Redo & Export Systems
-- [ ] **5.1 Undo / Redo History**:
-  - Implement snapshot or delta history stack for region styling, merges, and splits.
-  - Hook up keyboard shortcuts (`Ctrl+Z`, `Ctrl+Y`) and Edit menu actions.
+### Phase 5: Undo / Redo, Selection Marquee & Export Systems
+- [x] **5.1 Undo / Redo History**:
+  - Implement snapshot history stack for region styling, merges, splits, and re-traces with memory capping (`_MAX_HISTORY`).
+  - Wire shortcuts (`Ctrl+Z`, `Ctrl+Y`) and Edit menu actions to `undo()` and `redo()`.
 - [x] **5.2 Export Handlers**:
   - **PNG**: Export complete styled composite.
   - **Selection PNG**: Export selected region(s) on transparent background (cropped or canvas-sized).
   - **SVG Vector Export**: Convert region contours via `cv2.findContours` to SVG XML path elements with fills and strokes.
+- [x] **5.3 Application Rebranding & Drag-Select**:
+  - Renamed application to **Decalify** across all window titles, application meta, About dialogs, and documentation.
+  - Added rubber-band drag selection to Canvas with multi-region spatial intersection.
 
 ---
 
@@ -109,3 +114,5 @@ The application strictly isolates UI and image processing logic:
 | 2026-10-09 | **Phase 1 & Phase 2: Segmentation Engine & Selection System** | Implemented NumPy ↔ QImage bridge (`qimage_to_numpy`, `numpy_to_qimage`), OpenCV connected components segmentation (`auto`, `alpha`, `threshold`, `color` modes, blur, morphology closing, holes, gaps, and area filtering), live re-trace preview and cancellation, vectorized outline generation, multi-region selection (Replace, Add, Subtract), and right panel cropped preview with metadata. Verified with automated controller & GUI integration tests. |
 | 2026-10-10 | **Phase 3: Per-Region Styling & Rendering Engine** | Implemented non-destructive styling pipeline: Solid Fill with blend modes (Normal, Multiply, Screen, Overlay), Outside/Center/Inside Solid and Dashed/Dotted borders, Texture Image Fill (Cover, Stretch, Contain, Tile with rotation/scale), Linear & Radial Gradients, Drop Shadow / Outer Glow, live styling updates on option change, Reset tool, Eyedropper integration, and Selection PNG export. Verified with automated unit and GUI integration tests. |
 | 2026-10-10 | **Phase 4 & Export: Geometry Operations & SVG Export** | Implemented Merge tool (combining label IDs and recomputing geometries with optional gap filling), Split tool (two-point interactive cutting line with visual crosshair marker, line carving, and connected components partitioning), full vector SVG export (`generate_svg` with evenodd contour paths, linear/radial gradients, drop shadow filters, dashed/dotted strokes), and PNG composite & selection export. Verified with automated unit and XML validation tests. |
+| 2026-10-10 | **Phase 5: Undo / Redo, Drag Selection & App Rebranding** | Renamed application to **Decalify** in `main.py`, `ui/main_window.py`, and `README.md`. Implemented `QRubberBand` drag-to-select in `ui/canvas.py` and mapped intersected region bounding boxes in `controller.py`. Implemented full snapshot-based Undo/Redo history system in `controller.py` with memory bounds, capturing document state across tracing, styling actions, merges, and splits. |
+
