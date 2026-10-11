@@ -140,7 +140,7 @@ Each region can carry multiple independent, layerable styling descriptors:
 For Windows users who want to run Decalify without installing Python, standalone release builds are provided.
 
 ### Downloading Pre-built Release
-Download the latest `Decalify.exe` from the [Releases](https://github.com/your-username/decalify/releases) page and run it directly.
+Download the latest `Decalify.exe` from the [Releases](https://github.com/Manuel117s/Decalify/releases) page and run it directly.
 
 ### Building the Executable Yourself
 To build a single-file executable using PyInstaller:
